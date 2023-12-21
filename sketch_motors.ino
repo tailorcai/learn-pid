@@ -6,6 +6,17 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+#include "common.h"
+
+#include <OneButton.h>
+
+#define BUTTON_PIN 32
+OneButton btn = OneButton(
+  BUTTON_PIN,  // Input pin for the button
+  true,        // Button is active LOW
+  true         // Enable internal pull-up resistor
+);
+
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
@@ -13,40 +24,82 @@
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-int PWM=7000;          //PWM控制变量
+int PWM=5000;          //PWM控制变量
 int PWM_MAX = 7200;
 int Step=500;   //速度渐变速率 相当于加速度
-int MortorRun = 1;  //允许电机控制标志位
+int MotorRun = 0;  //允许电机控制标志位
+int   TargetVelocity=50;
+volatile int Encoder;  //目标速度、编码器读数、PWM控制变量
+volatile bool Encoder_changed = false;
+float Velcity_Kp=20,  Velcity_Ki=5,  Velcity_Kd; //相关速度PID参数
 
 McpwmMotor motor;
 
+void handleClick() {
+  MotorRun = 1 - MotorRun;
+  Serial.print("MotorRun=");
+  Serial.println(MotorRun);
+}
+
 void setup() {
   // put your setup code here, to run once:
+  Serial.begin(115200);
   prepare();
 
   motor.attachMotor(0, 33, 25);
+  MotorEncoder_Init();
+
+  btn.attachClick(handleClick);
+  pinMode( BUTTON_PIN, INPUT_PULLUP);
+
 }
 
-void loop() {
-	 while(1)
-	  {		
-			delay(200);	//延迟1秒
-			// LED=!LED;    //LED灯闪烁		
-      // if(KEY_Scan())MortorRun=!MortorRun; //按下按键MortorRun取反
-			
-			if(MortorRun)
-			{
-				//速度循环变化 
-				if(PWM<=-7000)Step=500;      //减速到反转最大速度后加速
-				else if(PWM>=7000)Step=-500; //加速到正转最大速度后减速
+void SetPWM(int pwm) {
+  pwm = min(max(pwm,-7200),7200);
+  motor.updateMotorSpeed(0, pwm*100.0 / PWM_MAX ); 
+}
+
+void ctrl_open_speed() {
+  //速度循环变化 
+  if(PWM<=-7000)Step=500;      //减速到反转最大速度后加速
+  else if(PWM>=7000)Step=-500; //加速到正转最大速度后减速
 				
-				PWM=PWM+Step; //速度渐变
-				motor.updateMotorSpeed(0, PWM*100.0 / PWM_MAX );  //设置PWM
-			}
-			else PWM=0,motor.updateMotorSpeed(0, PWM*100.0 / PWM_MAX ); //电机停止
-			
-			Oled_Show();  //OLED显示屏显示内容
-	  }
+  PWM=PWM+Step; //速度渐变
+  SetPWM(PWM); //设置PWM
+}
+
+void ctrl_closed_speed() {
+  if( Encoder_changed ) {
+    int pwm=Velocity_FeedbackControl(TargetVelocity, Encoder); //速度环闭环控制
+      Serial.print("PWM to be:");Serial.println(pwm);
+    SetPWM(pwm);
+    PWM = pwm;
+    Encoder_changed = false;
+  }
+}
+void loop() {
+  int cnt =0;
+  SetPWM(PWM);
+  while(1)
+  {		
+    cnt ++;
+    btn.tick();
+    delay(10);	//延迟1秒
+    // LED=!LED;    //LED灯闪烁		
+    // if(KEY_Scan())MortorRun=!MortorRun; //按下按键MortorRun取反
+    //  open
+    if(MotorRun)
+    {
+      // ctrl_open_speed();
+      if(  cnt %20 == 0 )
+        ctrl_closed_speed();
+
+    } 
+    else PWM=0,SetPWM(PWM); //电机停止
+    
+    if( cnt % 20 == 0)
+      Oled_Show();  //OLED显示屏显示内容
+  }
 }
 
 void prepare(void) 
@@ -73,18 +126,45 @@ void Oled_Show(void)
 
   display.setCursor(20,0);
   display.write("VelocityDirect");
-  display.setCursor(0, 20);
-  display.write("PWM       :");
-  if(PWM>=0)
+  display.setCursor(0, 10);
+  display.write("Target_V:");
+  if(TargetVelocity>=0)
   {
-    drawStr(80,20,"+");
-    drawStr(100,20, itoa(PWM,buf,10));
+    drawStr(80,10,"+");
+    drawStr(100,10, itoa(TargetVelocity,buf,10));
   }
   else
   {
-    drawStr(80,20,"-");
-    drawStr(100,20,itoa(-PWM,buf,10));
+    drawStr(80,10,"-");
+    drawStr(100,10,itoa(-TargetVelocity,buf,10));
   }
+
+		//显示当前速度，即编码器读数，分正负
+		drawStr(00,20,"Current_V:"); 		
+		if(Encoder>=0)
+		{
+			drawStr(80,20,"+");
+			drawStr(90,20,itoa(Encoder,buf,10));
+		}
+		else
+		{
+			drawStr(80,20,"-");
+			drawStr(90,20,itoa(-Encoder,buf,10));
+		}
+		
+		//显示速度控制值，即PWM，分正负
+		drawStr(00,30,"PWM      :"); 		
+		if(PWM>=0)
+		{
+			drawStr(80,30,"+");
+			drawStr(90,30,itoa(PWM,buf,10));
+		}
+		else
+		{
+			drawStr(80,30,"-");
+			drawStr(90,30,itoa(PWM,buf,10));
+		}
+
        
   display.display();
 }
