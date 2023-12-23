@@ -24,21 +24,17 @@ OneButton btn = OneButton(
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-int PWM=5000;          //PWM控制变量
+// int PWM=5000;          //PWM控制变量
 int PWM_MAX = 7200;
 int Step=500;   //速度渐变速率 相当于加速度
-int MotorRun = 0;  //允许电机控制标志位
-int   TargetVelocity=50;
-volatile int Encoder;  //目标速度、编码器读数、PWM控制变量
-volatile bool Encoder_changed = false;
-float Velcity_Kp=20,  Velcity_Ki=5,  Velcity_Kd; //相关速度PID参数
+MotorControl* mc = new MC_ClosedPosition();
 
 McpwmMotor motor;
 
 void handleClick() {
-  MotorRun = 1 - MotorRun;
+  mc->MotorRun = 1 - mc->MotorRun;
   Serial.print("MotorRun=");
-  Serial.println(MotorRun);
+  Serial.println(mc->MotorRun);
 }
 
 void setup() {
@@ -47,55 +43,72 @@ void setup() {
   prepare();
 
   motor.attachMotor(0, 33, 25);
-  MotorEncoder_Init();
+  mc->MotorEncoder_Init();
 
   btn.attachClick(handleClick);
   pinMode( BUTTON_PIN, INPUT_PULLUP);
 
 }
 
-void SetPWM(int pwm) {
+void MotorControl::setPWM(int pwm) {
   pwm = min(max(pwm,-7200),7200);
   motor.updateMotorSpeed(0, pwm*100.0 / PWM_MAX ); 
 }
 
-void ctrl_open_speed() {
+void MC_OpenVelocity::loop() {
   //速度循环变化 
-  if(PWM<=-7000)Step=500;      //减速到反转最大速度后加速
-  else if(PWM>=7000)Step=-500; //加速到正转最大速度后减速
+  if(this->PWM<=-7000) this->Step=500;      //减速到反转最大速度后加速
+  else if(this->PWM>=7000)  this->Step=-500; //加速到正转最大速度后减速
 				
-  PWM=PWM+Step; //速度渐变
-  SetPWM(PWM); //设置PWM
+  this->PWM=this->PWM+this->Step; //速度渐变
+  this->setPWM(this->PWM); //设置PWM
 }
 
-void ctrl_closed_speed() {
-  if( Encoder_changed ) {
-    int pwm=Velocity_FeedbackControl(TargetVelocity, Encoder); //速度环闭环控制
-      Serial.print("PWM to be:");Serial.println(pwm);
-    SetPWM(pwm);
-    PWM = pwm;
-    Encoder_changed = false;
+void MC_ClosedVelocity::loop() {
+  if( this->Encoder_changed ) {
+    int pwm=this->FeedbackControl(this->TargetVelocity, this->Encoder); //速度环闭环控制
+      // Serial.print("PWM to be:");Serial.println(pwm);
+    this->setPWM(pwm);
+    this->PWM = pwm;
+    this->Encoder_changed = false;
   }
 }
+
+void MC_ClosedPosition::loop() {
+  if( this->changed ) {
+    // mutex needed
+    int p = this->CurrentPosition;
+    this->changed = false;
+    // mutex end
+
+    int pwm=this->FeedbackControl(this->TargetCircle, p); //速度环闭环控制
+      // Serial.print("PWM to be:");Serial.println(pwm);
+    this->setPWM(pwm);
+    this->PWM = pwm;
+    
+  }
+}
+
 void loop() {
   int cnt =0;
-  SetPWM(PWM);
+  // mc->setPWM(PWM);
   while(1)
   {		
     cnt ++;
     btn.tick();
-    delay(10);	//延迟1秒
+    delay(10);	//延迟10ms
     // LED=!LED;    //LED灯闪烁		
     // if(KEY_Scan())MortorRun=!MortorRun; //按下按键MortorRun取反
     //  open
-    if(MotorRun)
+    if(mc->MotorRun)
     {
       // ctrl_open_speed();
-      if(  cnt %20 == 0 )
-        ctrl_closed_speed();
-
+      mc->loop();
     } 
-    else PWM=0,SetPWM(PWM); //电机停止
+    else {
+      mc->PWM=0;
+      mc->setPWM(0); //电机停止
+    }
     
     if( cnt % 20 == 0)
       Oled_Show();  //OLED显示屏显示内容
@@ -126,45 +139,66 @@ void Oled_Show(void)
 
   display.setCursor(20,0);
   display.write("VelocityDirect");
-  display.setCursor(0, 10);
-  display.write("Target_V:");
-  if(TargetVelocity>=0)
-  {
-    drawStr(80,10,"+");
-    drawStr(100,10, itoa(TargetVelocity,buf,10));
-  }
-  else
-  {
-    drawStr(80,10,"-");
-    drawStr(100,10,itoa(-TargetVelocity,buf,10));
-  }
+ 
+  display.setTextColor(WHITE); // Draw white text
 
 		//显示当前速度，即编码器读数，分正负
 		drawStr(00,20,"Current_V:"); 		
-		if(Encoder>=0)
+		if(mc->Encoder>=0)
 		{
 			drawStr(80,20,"+");
-			drawStr(90,20,itoa(Encoder,buf,10));
+			drawStr(90,20,itoa(mc->Encoder,buf,10));
 		}
 		else
 		{
 			drawStr(80,20,"-");
-			drawStr(90,20,itoa(-Encoder,buf,10));
+			drawStr(90,20,itoa(-mc->Encoder,buf,10));
 		}
 		
 		//显示速度控制值，即PWM，分正负
 		drawStr(00,30,"PWM      :"); 		
-		if(PWM>=0)
+		if(mc->PWM>=0)
 		{
 			drawStr(80,30,"+");
-			drawStr(90,30,itoa(PWM,buf,10));
+			drawStr(90,30,itoa(mc->PWM,buf,10));
 		}
 		else
 		{
 			drawStr(80,30,"-");
-			drawStr(90,30,itoa(PWM,buf,10));
+			drawStr(90,30,itoa(mc->PWM,buf,10));
 		}
+
+    mc->show();
 
        
   display.display();
+}
+void MC_ClosedVelocity::show() {
+  char buf[100];
+   display.setCursor(0, 10);
+  display.write("Target_V:");
+ 
+ if(this->TargetVelocity>=0)
+  {
+    drawStr(80,10,"+");
+    drawStr(100,10, itoa(this->TargetVelocity,buf,10));
+  }
+  else
+  {
+    drawStr(80,10,"-");
+    drawStr(100,10,itoa(-this->TargetVelocity,buf,10));
+  }
+}
+
+void MC_ClosedPosition::show() {
+  char buf[100];
+    display.setCursor(0, 10);
+  display.write("Target_P:");
+
+    drawStr(80,10, itoa(this->TargetCircle*1040*1.04,buf,10));
+    display.setCursor(0, 40);
+  display.write("Current_P:");
+
+    drawStr(80,40, itoa(this->CurrentPosition,buf,10));
+
 }
