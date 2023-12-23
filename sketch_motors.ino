@@ -27,7 +27,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // int PWM=5000;          //PWM控制变量
 int PWM_MAX = 7200;
 int Step=500;   //速度渐变速率 相当于加速度
-MotorControl* mc = new MC_ClosedPosition();
+MotorControl* mc = new MC_ClosedVP();
 
 McpwmMotor motor;
 
@@ -57,34 +57,34 @@ void MotorControl::setPWM(int pwm) {
 
 void MC_OpenVelocity::loop() {
   //速度循环变化 
-  if(this->PWM<=-7000) this->Step=500;      //减速到反转最大速度后加速
-  else if(this->PWM>=7000)  this->Step=-500; //加速到正转最大速度后减速
+  if(PWM<=-7000) Step=500;      //减速到反转最大速度后加速
+  else if(PWM>=7000)  Step=-500; //加速到正转最大速度后减速
 				
-  this->PWM=this->PWM+this->Step; //速度渐变
-  this->setPWM(this->PWM); //设置PWM
+  PWM=PWM+Step; //速度渐变
+  setPWM(PWM); //设置PWM
 }
 
 void MC_ClosedVelocity::loop() {
-  if( this->Encoder_changed ) {
-    int pwm=this->FeedbackControl(this->TargetVelocity, this->Encoder); //速度环闭环控制
+  if( Encoder_changed ) {
+    int pwm=FeedbackControl(TargetVelocity, Encoder); //速度环闭环控制
       // Serial.print("PWM to be:");Serial.println(pwm);
-    this->setPWM(pwm);
-    this->PWM = pwm;
-    this->Encoder_changed = false;
+    setPWM(pwm);
+    PWM = pwm;
+    Encoder_changed = false;
   }
 }
 
 void MC_ClosedPosition::loop() {
-  if( this->changed ) {
+  if( changed ) {
     // mutex needed
-    int p = this->CurrentPosition;
-    this->changed = false;
+    int p = CurrentPosition;
+    changed = false;
     // mutex end
 
-    int pwm=this->FeedbackControl(this->TargetCircle, p); //速度环闭环控制
+    int pwm=FeedbackControl(TargetCircle, p); //速度环闭环控制
       // Serial.print("PWM to be:");Serial.println(pwm);
-    this->setPWM(pwm);
-    this->PWM = pwm;
+    setPWM(pwm);
+    PWM = pwm;
     
   }
 }
@@ -123,14 +123,18 @@ void prepare(void)
   }
 }
 
-void drawStr(int x,int y, const char* t) {
-  display.setCursor(x, y);
-  display.write( t);
+void drawStr(int line, const char* name, int t) {
+  char buf[100];
+
+  display.setCursor(0, line*10);
+  display.write( name );
+  display.setCursor(80,line*10);
+  if (t) display.write( t>0?"+":"-" );
+  display.setCursor(100,line*10);
+  display.write( itoa(t,buf,10) );
 }
 void Oled_Show(void)
 {  
-  char buf[100];
-
   display.clearDisplay();
   display.setTextSize(1);      // Normal 1:1 pixel scale
   display.setTextColor(WHITE); // Draw white text
@@ -143,30 +147,6 @@ void Oled_Show(void)
   display.setTextColor(WHITE); // Draw white text
 
 		//显示当前速度，即编码器读数，分正负
-		drawStr(00,20,"Current_V:"); 		
-		if(mc->Encoder>=0)
-		{
-			drawStr(80,20,"+");
-			drawStr(90,20,itoa(mc->Encoder,buf,10));
-		}
-		else
-		{
-			drawStr(80,20,"-");
-			drawStr(90,20,itoa(-mc->Encoder,buf,10));
-		}
-		
-		//显示速度控制值，即PWM，分正负
-		drawStr(00,30,"PWM      :"); 		
-		if(mc->PWM>=0)
-		{
-			drawStr(80,30,"+");
-			drawStr(90,30,itoa(mc->PWM,buf,10));
-		}
-		else
-		{
-			drawStr(80,30,"-");
-			drawStr(90,30,itoa(mc->PWM,buf,10));
-		}
 
     mc->show();
 
@@ -174,31 +154,58 @@ void Oled_Show(void)
   display.display();
 }
 void MC_ClosedVelocity::show() {
-  char buf[100];
-   display.setCursor(0, 10);
-  display.write("Target_V:");
- 
- if(this->TargetVelocity>=0)
-  {
-    drawStr(80,10,"+");
-    drawStr(100,10, itoa(this->TargetVelocity,buf,10));
-  }
-  else
-  {
-    drawStr(80,10,"-");
-    drawStr(100,10,itoa(-this->TargetVelocity,buf,10));
-  }
+  drawStr(1, "Current_V:", Encoder); 		
+  drawStr(2, "Target_V :", TargetVelocity); 		
+  drawStr(3, "PWM      :", PWM); 		
 }
 
 void MC_ClosedPosition::show() {
-  char buf[100];
-    display.setCursor(0, 10);
-  display.write("Target_P:");
+  drawStr(1, "Current_V:", Encoder); 		
+  // drawStr(2, "Target_V :", mc->TargetVelocity); 		
+  drawStr(2, "PWM      :", PWM); 	
+  drawStr(3, "Current_P:", CurrentPosition);
+  drawStr(4, "Target_P :", TargetCircle*1040*1.04);
+}
 
-    drawStr(80,10, itoa(this->TargetCircle*1040*1.04,buf,10));
-    display.setCursor(0, 40);
-  display.write("Current_P:");
+void MC_ClosedPosition2::show() {
+  drawStr(1, "Current_V:", Encoder); 		
+  drawStr(2, "PWM      :", PWM); 	
+  drawStr(3, "Current_P:", CurrentPosition);
+  drawStr(4, "Target_P :", TargetCircle*1040*1.04);
+}
 
-    drawStr(80,40, itoa(this->CurrentPosition,buf,10));
+void MC_ClosedPosition2::loop() {
+  static int TimeCount = 0;
+  TimeCount += 1; // 10ms each
+  if(TimeCount<=300) TargetCircle=2;      
+	else if(300<TimeCount) TargetCircle=-1; 
+  MC_ClosedPosition::loop();
+}
 
+void MC_ClosedVP::show() {
+  drawStr(1, "Current_V:", Encoder); 		
+  drawStr(2, "Target_V:", TargetVelocity); 		
+  drawStr(2, "PWM      :", PWM); 	
+  drawStr(3, "Current_P:", CurrentPosition);
+  drawStr(4, "Target_P :", TargetCircle*1040*1.04);
+}
+
+void MC_ClosedVP::loop() {
+  static int TimeCount = 0;
+  TimeCount += 1; // 10ms each
+  if(TimeCount<=600) TargetCircle=15,TargetVelocity=40;   
+	else if(600<TimeCount) TargetCircle=30,TargetVelocity=20;
+
+  int PWM_P=MC_ClosedPosition::FeedbackControl(TargetCircle,CurrentPosition); //位置闭环控制
+  int PWM_V=PWM_P/76; //PWM 值转换为速度值 76 为转换参数
+  
+  // PWM_P=Velocity_Restrict(PWM_P,TargetVelocity); //限幅位置环输出的 PWM
+  if (PWM_V>+TargetVelocity) 
+    PWM_V=+TargetVelocity;
+	else if(PWM_V<-TargetVelocity) 
+    PWM_V=-TargetVelocity;
+	// else PWM_V=PWM_V;
+
+  PWM=MC_ClosedVelocity::FeedbackControl(PWM_V, Encoder); //速度环闭环控制 相当于位置环的输出为速度环的输入，形成串级 PID  
+  setPWM(PWM); //设置PWM
 }

@@ -24,20 +24,20 @@ class MotorControl {
     int Read_Encoder(void);
 };
 
-class MC_ClosedVelocity: public MotorControl {
+class MC_ClosedVelocity: public virtual MotorControl {
   public:
     int   TargetVelocity;
     volatile bool Encoder_changed;
     float Velcity_Kp,  Velcity_Ki,  Velcity_Kd; //相关速度PID参数
 
     MC_ClosedVelocity():Encoder_changed(false) {
-      this->Velcity_Kp = 20;
-      this->Velcity_Ki = 5;
-      this->TargetVelocity = 50;
+      Velcity_Kp = 20;
+      Velcity_Ki = 5;
+      TargetVelocity = 50;
     }
     virtual void encoder_handler() override {
-      this->Encoder = this->Read_Encoder();
-      this->Encoder_changed = true;
+      Encoder = Read_Encoder();
+      Encoder_changed = true;
     }
     virtual void loop() override;
     virtual void show() override;
@@ -45,7 +45,7 @@ class MC_ClosedVelocity: public MotorControl {
     int FeedbackControl(int TargetVelocity, int CurrentVelocity);
 };
 
-class MC_ClosedPosition: public MotorControl {
+class MC_ClosedPosition: public virtual MotorControl {
   public:
     int CurrentPosition;
     volatile bool changed;
@@ -56,9 +56,9 @@ class MC_ClosedPosition: public MotorControl {
     MC_ClosedPosition():CurrentPosition(0),Position_Kp(120), Position_Ki(0.1), Position_Kd(400),TargetCircle(10) {
     }
     virtual void encoder_handler() override {
-      this->Encoder = this->Read_Encoder();
-      this->CurrentPosition += this->Encoder;
-      this->changed = true;
+      Encoder = Read_Encoder();
+      CurrentPosition += Encoder;
+      changed = true;
     }
     virtual void loop() override;
     virtual void show() override;
@@ -66,17 +66,38 @@ class MC_ClosedPosition: public MotorControl {
     int FeedbackControl(float, int);
 
 };
-class MC_OpenVelocity: public MotorControl {
+class MC_OpenVelocity: public virtual MotorControl {
   public:
     int  Step;
     MC_OpenVelocity():Step(0) {
-      // this->Velcity_Kp = 20;
-      // this->Velcity_Ki = 5;
-      // this->TargetVelocity = 50;
+
     }
 
     virtual void loop() override;
 };
+
+class MC_ClosedPosition2: public virtual MC_ClosedPosition {
+  public:
+    virtual void loop() override;
+    virtual void show() override;
+};
+
+class MC_ClosedVP: public virtual MC_ClosedPosition, public virtual MC_ClosedVelocity {
+  public:
+    MC_ClosedVP() {
+      TargetVelocity = 90;
+      TargetCircle = 20;
+      Velcity_Kp = 80;
+      Velcity_Ki = 10;
+    }
+    virtual void loop() override;
+    virtual void show() override;
+    virtual void encoder_handler() override {
+      MC_ClosedPosition::encoder_handler();
+    }
+};
+
+
 // extern void SetPWM(int);
 // extern int Velocity_FeedbackControl(int,int);
 
